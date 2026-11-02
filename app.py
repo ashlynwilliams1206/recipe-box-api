@@ -8,6 +8,7 @@ That is the point: you will add both, lesson by lesson, in Units 2 and 3.
 import sqlite3
 
 from flask import Flask, g, jsonify, request
+from werkzeug.security import generate_password_hash, check_password_hash
 
 DATABASE = "recipes.db"
 
@@ -28,6 +29,56 @@ def close_db(exception):
     if db is not None:
         db.close()
 
+def hash_password(plaintext_password: str) -> str:
+    """Return a one-way hash for storing in users.password_hash."""
+    return generate_password_hash(plaintext_password)
+
+
+def verify_password(stored_hash: str, candidate_password: str) -> bool:
+    """Return True if the candidate_password matches the stored hash."""
+    return check_password_hash(stored_hash, candidate_password)
+
+
+@app.post("/users")
+def create_user():
+    data = request.get_json(silent=True)
+
+    if not isinstance(data, dict):
+        return jsonify({"error": "a JSON object is required"}), 400
+
+    for field in ("username", "email", "password"):
+        value = data.get(field)
+        if not isinstance(value, str) or not value.strip():
+            return jsonify({"error": f"{field} is required"}), 400
+
+    username = data["username"].strip()
+    email = data["email"].strip()
+
+    password_hash = hash_password(data["password"])
+
+    db = get_db()
+
+    try:
+        cursor = db.execute(
+            """
+            INSERT INTO users (username, email, password_hash)
+            VALUES (?, ?, ?)
+            """,
+            (username, email, password_hash),
+        )
+        db.commit()
+
+    except sqlite3.IntegrityError:
+        db.rollback()
+        return jsonify({
+            "error": "username or email already in use"
+        }), 409
+
+    return jsonify({
+        "id": cursor.lastrowid,
+        "username": username,
+        "email": email,
+    }), 201
 
 def recipe_to_dict(row):
     return {
