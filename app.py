@@ -80,15 +80,42 @@ def create_user():
         "email": email,
     }), 201
 
-def recipe_to_dict(row):
-    return {
-        "id": row["id"],
-        "title": row["title"],
-        "ingredients": row["ingredients"],
-        "instructions": row["instructions"],
-        "is_public": bool(row["is_public"]),
-    }
 
+@app.post("/login")
+def login():
+    data = request.get_json(silent=True)
+
+    if not isinstance(data, dict):
+        return jsonify({"error": "a JSON object is required"}), 400
+
+    username = data.get("username")
+    password = data.get("password")
+
+    if (
+        not isinstance(username, str)
+        or not username.strip()
+        or not isinstance(password, str)
+        or not password
+    ):
+        return jsonify({
+            "error": "username and password are required"
+        }), 400
+
+    db = get_db()
+    user = db.execute(
+        "SELECT id, username, password_hash FROM users WHERE username = ?",
+        (username.strip(),),
+    ).fetchone()
+
+    if user is None or not verify_password(user["password_hash"], password):
+        return jsonify({
+            "error": "invalid username or password"
+        }), 401
+
+    return jsonify({
+        "id": user["id"],
+        "username": user["username"],
+    }), 200
 
 @app.get("/")
 def hello():
