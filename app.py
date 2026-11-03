@@ -38,6 +38,14 @@ def verify_password(stored_hash: str, candidate_password: str) -> bool:
     """Return True if the candidate_password matches the stored hash."""
     return check_password_hash(stored_hash, candidate_password)
 
+def recipe_to_dict(row):
+    return {
+        "id": row["id"],
+        "title": row["title"],
+        "ingredients": row["ingredients"],
+        "instructions": row["instructions"],
+        "is_public": bool(row["is_public"]),
+    }
 
 @app.post("/users")
 def create_user():
