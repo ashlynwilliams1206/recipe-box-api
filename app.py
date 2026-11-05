@@ -6,13 +6,21 @@ That is the point: you will add both, lesson by lesson, in Units 2 and 3.
 """
 
 import sqlite3
+import os
+import jwt
+from datetime import datetime, timedelta, timezone
 
+from dotenv import load_dotenv
 from flask import Flask, g, jsonify, request
 from werkzeug.security import generate_password_hash, check_password_hash
+
+load_dotenv()
 
 DATABASE = "recipes.db"
 
 app = Flask(__name__)
+app.config["JWT_SECRET"] = os.environ["JWT_SECRET"]
+print("JWT_SECRET from app.config:", app.config["JWT_SECRET"])
 
 
 def get_db():
@@ -89,6 +97,7 @@ def create_user():
     }), 201
 
 
+
 @app.post("/login")
 def login():
     data = request.get_json(silent=True)
@@ -120,9 +129,23 @@ def login():
             "error": "invalid username or password"
         }), 401
 
+    user_id = user["id"]
+
+    payload = {
+        "sub": str(user_id),
+        "exp": datetime.now(timezone.utc) + timedelta(hours=1),
+    }
+
+    token = jwt.encode(
+        payload,
+        app.config["JWT_SECRET"],
+        algorithm="HS256",
+    )
+
     return jsonify({
         "id": user["id"],
         "username": user["username"],
+        "token": token,
     }), 200
 
 @app.get("/")
