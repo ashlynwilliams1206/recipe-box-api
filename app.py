@@ -20,8 +20,6 @@ DATABASE = "recipes.db"
 
 app = Flask(__name__)
 app.config["JWT_SECRET"] = os.environ["JWT_SECRET"]
-print("JWT_SECRET from app.config:", app.config["JWT_SECRET"])
-
 
 def get_db():
     if "db" not in g:
@@ -30,6 +28,31 @@ def get_db():
         g.db.execute("PRAGMA foreign_keys = ON")
     return g.db
 
+def get_authenticated_identity():
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        # Missing or malformed header
+        return None, ("missing or invalid Authorization header", 401)
+
+    token = auth_header.removeprefix("Bearer ").strip()
+    if not token:
+        return None, ("missing token", 401)
+
+    try:
+        payload = jwt.decode(
+            token,
+            app.config["JWT_SECRET"],
+            algorithms=["HS256"],
+        )
+    except jwt.InvalidTokenError:
+        return None, ("invalid token", 401)
+
+    # pull out who this is (from your login-issued token)
+    user_id = payload.get("sub")
+    if not user_id:
+        return None, ("token missing sub claim", 401)
+
+    return user_id, None
 
 @app.teardown_appcontext
 def close_db(exception):
@@ -171,9 +194,15 @@ def get_recipe(recipe_id):
 
 @app.post("/recipes")
 def create_recipe():
+    user_id, error = get_authenticated_identity()
+    if error:
+        message, status = error
+        return jsonify({"error": message}), status
+
     data = request.get_json(silent=True)
     if not data or not data.get("title") or not data.get("ingredients"):
         return jsonify({"error": "title and ingredients are required"}), 400
+
     db = get_db()
     try:
         cur = db.execute(
@@ -189,14 +218,24 @@ def create_recipe():
         db.commit()
     except sqlite3.IntegrityError:
         return jsonify({"error": "a recipe with that title already exists"}), 409
+
     row = db.execute(
         "SELECT * FROM recipes WHERE id = ?", (cur.lastrowid,)
     ).fetchone()
-    return jsonify(recipe_to_dict(row)), 201
+    recipe = recipe_to_dict(row)
+    # 👇 show who created it (from the token)
+    recipe["created_by"] = user_id
+    return jsonify(recipe), 201
+
 
 
 @app.patch("/recipes/<int:recipe_id>")
 def update_recipe(recipe_id):
+    user_id, error = get_authenticated_identity()
+    if error:
+        message, status = error
+        return jsonify({"error": message}), status
+
     data = request.get_json(silent=True)
     if not data:
         return jsonify({"error": "a JSON body is required"}), 400
@@ -227,8 +266,14 @@ def update_recipe(recipe_id):
     return jsonify(recipe_to_dict(row))
 
 
+
 @app.delete("/recipes/<int:recipe_id>")
 def delete_recipe(recipe_id):
+    user_id, error = get_authenticated_identity()
+    if error:
+        message, status = error
+        return jsonify({"error": message}), status
+
     db = get_db()
     cur = db.execute("DELETE FROM recipes WHERE id = ?", (recipe_id,))
     db.commit()
