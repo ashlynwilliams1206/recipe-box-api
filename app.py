@@ -28,6 +28,7 @@ def get_db():
         g.db.execute("PRAGMA foreign_keys = ON")
     return g.db
 
+
 def get_authenticated_identity():
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):
@@ -44,10 +45,12 @@ def get_authenticated_identity():
             app.config["JWT_SECRET"],
             algorithms=["HS256"],
         )
+    except jwt.ExpiredSignatureError:
+        return None, ("token expired, please log in again", 401)
     except jwt.InvalidTokenError:
         return None, ("invalid token", 401)
 
-    # pull out who this is (from your login-issued token)
+    # Pull out who this is (from the login-issued token)
     user_id = payload.get("sub")
     if not user_id:
         return None, ("token missing sub claim", 401)
