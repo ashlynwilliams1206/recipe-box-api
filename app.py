@@ -13,6 +13,7 @@ from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 from flask import Flask, g, jsonify, request
 from werkzeug.security import generate_password_hash, check_password_hash
+from functools import wraps
 
 load_dotenv()
 
@@ -67,6 +68,22 @@ def get_authenticated_identity():
     g.auth_role = role
 
     return user_id, None
+
+
+def require_auth(view):
+    @wraps(view)
+    def wrapper(*args, **kwargs):
+        user_id, error = get_authenticated_identity()
+
+        if error:
+            message, status = error
+            return jsonify({"error": message}), status
+
+        g.user_id = int(user_id)
+
+        return view(*args, **kwargs)
+
+    return wrapper
 
 @app.teardown_appcontext
 def close_db(exception):
@@ -166,8 +183,6 @@ def login():
             "error": "invalid username or password"
         }), 401
 
-    user_id = user["id"]
-
     payload = {
         "sub": str(user["id"]),
         "role": user["role"],
@@ -208,12 +223,9 @@ def get_recipe(recipe_id):
 
 
 @app.post("/recipes")
+@require_auth
 def create_recipe():
-    user_id, error = get_authenticated_identity()
-    if error:
-        message, status = error
-        return jsonify({"error": message}), status
-
+    user_id = g.user_id
     data = request.get_json(silent=True)
     if not data or not data.get("title") or not data.get("ingredients"):
         return jsonify({"error": "title and ingredients are required"}), 400
@@ -229,7 +241,7 @@ def create_recipe():
                 data["ingredients"],
                 data.get("instructions", ""),
                 1 if data.get("is_public", True) else 0,
-                int(user_id),
+                user_id
             ),
         )
         db.commit()
@@ -249,12 +261,9 @@ def create_recipe():
 
 
 @app.patch("/recipes/<int:recipe_id>")
+@require_auth
 def update_recipe(recipe_id):
-    user_id, error = get_authenticated_identity()
-    if error:
-        message, status = error
-        return jsonify({"error": message}), status
-
+    user_id = g.user_id
     db = get_db()
 
     recipe = db.execute(
@@ -286,7 +295,7 @@ def update_recipe(recipe_id):
     if not fields:
         return jsonify({"error": "nothing to update"}), 400
 
-    values.extend((recipe_id, int(user_id), g.auth_role))
+    values.extend((recipe_id, g.user_id, g.auth_role))
 
     try:
         cur = db.execute(
@@ -317,11 +326,9 @@ def update_recipe(recipe_id):
 
 
 @app.delete("/recipes/<int:recipe_id>")
+@require_auth
 def delete_recipe(recipe_id):
-    user_id, error = get_authenticated_identity()
-    if error:
-        message, status = error
-        return jsonify({"error": message}), status
+    user_id = g.user_id
 
     db = get_db()
 
@@ -339,7 +346,7 @@ def delete_recipe(recipe_id):
     cur = db.execute(
         "DELETE FROM recipes "
         "WHERE id = ? AND (owner_id = ? OR ? = 'admin')",
-        (recipe_id, int(user_id), g.auth_role),
+        (recipe_id, g.user_id, g.auth_role),
     )
 
     if cur.rowcount == 0:
